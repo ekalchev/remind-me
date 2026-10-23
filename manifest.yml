@@ -26,8 +26,7 @@ modules:
       # src/handlers/deliver.ts stops claiming work after RUN_BUDGET_MS (100 s).
       timeoutSeconds: 120
 app:
-  # Replaced by `forge register`.
-  id: ari:cloud:ecosystem::app/00000000-0000-0000-0000-000000000000
+  id: ari:cloud:ecosystem::app/89f65791-b0c5-4a8f-a270-91fd951377f7
   runtime:
     name: nodejs22.x
   storage:
