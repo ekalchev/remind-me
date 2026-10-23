@@ -2,23 +2,34 @@
  * Handles `avi:jira:commented:issue` (fired when a comment is created and
  * again on every edit) and `avi:jira:deleted:comment`.
  *
- * A comment sets at most one reminder. Editing the comment re-parses it and
- * moves the reminder, rewriting the app's confirmation in place rather than
- * posting another; editing the command away or deleting the comment cancels
- * it. `list`, `cancel` and `help` answer only the first version of a comment,
- * by email to the asker alone; a comment that held nothing but the command is
- * then deleted, so the issue keeps no trace of it.
+ * Every comment is read for a reminder request in one of two ways:
+ *
+ * - **Explicit**: a `RemindMe!` keyword, parsed by code. Free, exact, and the
+ *   fallback when the AI is unavailable. A reminder without a note gets one
+ *   from the AI when it can.
+ * - **Natural language**: any other comment goes to Forge LLMs, which decides
+ *   whether the author asks to be reminded, to see their reminders, or to
+ *   cancel them, and returns the time as a phrase the same parser resolves.
+ *
+ * A comment sets at most one reminder. Editing the comment re-reads it and
+ * moves the reminder, rewriting the app's confirmation in place; editing the
+ * request away or deleting the comment cancels it. List and cancel requests
+ * answer only the first version of a comment, by email to the asker alone; an
+ * explicit command comment that held nothing else is then deleted.
  */
 
 import kvs from '@forge/kvs';
 import { adfToText } from '../adf';
-import { commentContext, parseCommand, type Command } from '../command';
+import { interpretComment, type Interpretation } from '../ai';
+import { commentContext, parseCommand } from '../command';
 import { parseJiraDate, resolveLocale, resolveZone } from '../format';
 import {
   addComment,
   deleteComment,
   getBaseUrl,
   getComment,
+  getCommentsBefore,
+  getIssue,
   getUser,
   notifyUser,
   replyTargetFor,
@@ -40,13 +51,27 @@ import {
   type ReminderEmail,
 } from '../messages';
 import { createReminder, findPending, getReminder, reminderKey, replaceReminder } from '../store';
-import { resolveWhen } from '../time';
+import { resolveWhen, type WhenResult } from '../time';
 import type { Reminder } from '../types';
 
 export const MAX_PENDING_PER_ISSUE = 25;
 
 /** A comment counts as edited once its update time moves this far past its creation. */
 const EDIT_THRESHOLD_MS = 2_000;
+
+/** Shorter comments ("ok", "+1") are not worth asking the AI about. */
+const MIN_AI_TEXT_LENGTH = 6;
+
+/** How many earlier comments the AI sees, to resolve "this" or "that". */
+const PREVIOUS_COMMENTS = 3;
+
+/** What a comment asks for, whichever way it was read. */
+type Request =
+  | { kind: 'none' }
+  | { kind: 'set'; when: WhenResult }
+  | { kind: 'list' }
+  | { kind: 'cancel'; index?: number }
+  | { kind: 'help' };
 
 export interface CommentEvent {
   selfGenerated?: boolean;
@@ -68,36 +93,41 @@ export async function onComment(event: CommentEvent): Promise<void> {
     return;
   }
   const text = adfToText(comment.body);
-  const command = parseCommand(text);
+  const explicit = parseCommand(text).kind !== 'none';
   const existing = await getReminder(reminderKey(commentId));
-  if ((command.kind === 'none' && !existing) || !(await firstDeliveryOf(comment))) {
+  if (!explicit && !existing && text.length < MIN_AI_TEXT_LENGTH) {
+    return;
+  }
+  if (!(await firstDeliveryOf(comment))) {
     return;
   }
 
   const user = await getUser(accountId);
   const { zone, fallback } = resolveZone(user?.timeZone);
-  const recipient: Recipient = { accountId, displayName: user?.displayName ?? 'there' };
   const context: Context = {
     issueId,
     issueKey: event.issue?.key ?? issueId,
     comment,
     text,
+    explicit,
+    createdAt: parseJiraDate(comment.created),
     accountId,
-    recipient,
+    recipient: { accountId, displayName: user?.displayName ?? comment.author?.displayName ?? 'there' },
     zone,
     zoneIsFallback: fallback,
     locale: resolveLocale(user?.locale),
     reply: replyTargetFor(issueId, comment),
   };
 
+  const request = explicit ? await readKeyword(context) : await readWithAi(context);
   if (existing) {
-    await onEdit(context, command, existing);
+    await onEdit(context, request, existing);
     return;
   }
   const edited = isEdited(comment);
-  switch (command.kind) {
+  switch (request.kind) {
     case 'set':
-      await setReminder(context, command.args);
+      await setReminder(context, request.when);
       break;
     case 'list':
       if (!edited) {
@@ -107,8 +137,8 @@ export async function onComment(event: CommentEvent): Promise<void> {
       break;
     case 'cancel':
       if (!edited) {
-        const cancelled = await cancelReminders(context, command.index);
-        await answerPrivately(context, cancelEmail(context.issueKey, cancelled, await getBaseUrl(), command.index));
+        const cancelled = await cancelReminders(context, request.index);
+        await answerPrivately(context, cancelEmail(context.issueKey, cancelled, await getBaseUrl(), request.index));
       }
       break;
     case 'help':
@@ -144,6 +174,9 @@ interface Context {
   issueKey: string;
   comment: JiraComment;
   text: string;
+  /** The comment uses the `RemindMe!` keyword rather than natural language. */
+  explicit: boolean;
+  createdAt: Date;
   accountId: string;
   recipient: Recipient;
   zone: string;
@@ -152,11 +185,71 @@ interface Context {
   reply: ReplyTarget;
 }
 
-async function setReminder(context: Context, args: string): Promise<void> {
-  const createdAt = parseJiraDate(context.comment.created);
-  const when = resolveWhen(args, createdAt, context.zone);
+async function readKeyword(context: Context): Promise<Request> {
+  const command = parseCommand(context.text);
+  if (command.kind !== 'set') {
+    return command.kind === 'none' ? { kind: 'none' } : command;
+  }
+  const when = resolveWhen(command.args, context.createdAt, context.zone);
+  if (when.ok && !when.note) {
+    const read = await askAi(context);
+    if (read?.intent === 'set' && read.note) {
+      return { kind: 'set', when: { ...when, note: read.note } };
+    }
+  }
+  return { kind: 'set', when };
+}
+
+async function readWithAi(context: Context): Promise<Request> {
+  const read = await askAi(context);
+  switch (read?.intent) {
+    case 'set': {
+      const when = resolveWhen(read.when, context.createdAt, context.zone);
+      if (!when.ok) {
+        console.warn(`AI time "${read.when}" for comment ${context.comment.id} did not resolve: ${when.reason}`);
+        return { kind: 'none' };
+      }
+      return { kind: 'set', when: { ...when, note: read.note } };
+    }
+    case 'list':
+      return { kind: 'list' };
+    case 'cancel':
+      return { kind: 'cancel', index: read.index };
+    default:
+      return { kind: 'none' };
+  }
+}
+
+/** The AI's reading of the comment, or null when the AI is unavailable (the failure is logged). */
+async function askAi(context: Context): Promise<Interpretation | null> {
+  try {
+    const [issue, previous] = await Promise.all([
+      getIssue(context.issueId),
+      getCommentsBefore(context.issueId, context.comment.id, PREVIOUS_COMMENTS),
+    ]);
+    return await interpretComment({
+      text: context.text,
+      authorName: context.recipient.displayName,
+      createdAt: context.createdAt,
+      zone: context.zone,
+      issueKey: issue?.key ?? context.issueKey,
+      issueSummary: issue?.summary ?? '',
+      previous: previous.map((comment) => ({
+        authorName: comment.author?.displayName ?? 'Someone',
+        text: adfToText(comment.body),
+      })),
+    });
+  } catch (error) {
+    console.error(`AI could not read comment ${context.comment.id}`, error);
+    return null;
+  }
+}
+
+async function setReminder(context: Context, when: WhenResult): Promise<void> {
   if (!when.ok) {
-    await addComment(context.reply, helpDoc(context.recipient, when.reason));
+    if (context.explicit) {
+      await addComment(context.reply, helpDoc(context.recipient, when.reason));
+    }
     return;
   }
   if ((await findPending(context.issueId, context.accountId)).length >= MAX_PENDING_PER_ISSUE) {
@@ -172,7 +265,7 @@ async function setReminder(context: Context, args: string): Promise<void> {
     accountId: context.accountId,
     dueAt: when.dueAt.getTime(),
     note: when.note,
-    createdAt: createdAt.getTime(),
+    createdAt: context.createdAt.getTime(),
     status: 'pending',
     attempts: 0,
     leaseUntil: 0,
@@ -185,12 +278,12 @@ async function setReminder(context: Context, args: string): Promise<void> {
   }
   const confirmationCommentId = await addComment(
     context.reply,
-    confirmationDoc(context.recipient, reminder, createdAt, context.zoneIsFallback),
+    confirmationDoc(context.recipient, reminder, context.createdAt, context.zoneIsFallback),
   );
   await replaceReminder(reminder, { ...reminder, confirmationCommentId });
 }
 
-async function onEdit(context: Context, command: Command, existing: Reminder): Promise<void> {
+async function onEdit(context: Context, request: Request, existing: Reminder): Promise<void> {
   if (existing.status !== 'pending') {
     return;
   }
@@ -198,15 +291,14 @@ async function onEdit(context: Context, command: Command, existing: Reminder): P
   const showOrReply = async (body: Parameters<typeof addComment>[1]) =>
     confirmationId ? updateComment(context.issueId, confirmationId, body) : void (await addComment(context.reply, body));
 
-  if (command.kind !== 'set') {
-    if (await replaceReminder(existing, { ...existing, status: 'cancelled', lastError: 'command removed by edit' })) {
+  if (request.kind !== 'set') {
+    if (await replaceReminder(existing, { ...existing, status: 'cancelled', lastError: 'request removed by edit' })) {
       await showOrReply(cancelledByEditDoc(context.recipient));
     }
     return;
   }
 
-  const editedAt = parseJiraDate(context.comment.updated);
-  const when = resolveWhen(command.args, parseJiraDate(context.comment.created), context.zone);
+  const when = request.when;
   if (!when.ok) {
     if (await replaceReminder(existing, { ...existing, status: 'cancelled', lastError: `edit unparsed: ${when.reason}` })) {
       await showOrReply(helpDoc(context.recipient, when.reason));
@@ -226,7 +318,7 @@ async function onEdit(context: Context, command: Command, existing: Reminder): P
     locale: context.locale,
   });
   if (moved) {
-    await showOrReply(rescheduledDoc(context.recipient, moved, editedAt, context.zoneIsFallback));
+    await showOrReply(rescheduledDoc(context.recipient, moved, parseJiraDate(context.comment.updated), context.zoneIsFallback));
   }
 }
 
@@ -243,10 +335,13 @@ async function cancelReminders(context: Context, index?: number): Promise<number
   return cancelled;
 }
 
-/** Emails the answer to the asker, then deletes their comment if it held nothing but the command. */
+/**
+ * Emails the answer to the asker. An explicit command comment that held
+ * nothing else is then deleted; a natural-language comment never is.
+ */
 async function answerPrivately(context: Context, email: ReminderEmail): Promise<void> {
   await notifyUser(context.issueId, context.accountId, email);
-  if (commentContext(context.text) === '' && !(await deleteComment(context.issueId, context.comment.id))) {
+  if (context.explicit && commentContext(context.text) === '' && !(await deleteComment(context.issueId, context.comment.id))) {
     console.log(`Not allowed to delete command comment ${context.comment.id}; leaving it`);
   }
 }

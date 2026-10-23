@@ -16,6 +16,10 @@ modules:
     - key: remindme-deliver-due
       function: deliver-due
       interval: fiveMinute
+  llm:
+    - key: remindme-llm
+      model:
+        - claude
   function:
     - key: on-comment
       handler: index.onComment

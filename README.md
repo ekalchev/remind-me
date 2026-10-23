@@ -1,33 +1,47 @@
 # Remind Me for Jira
 
-Reddit-style `RemindMe!` for Jira Cloud. Write a comment on an issue, and Jira emails you about that issue when the time comes.
+Ask for a reminder in plain words in any Jira comment, and Jira emails you about that issue when the time comes:
 
 ```
-RemindMe! 2 days
-RemindMe! in 5 hours "check if Sam replied"
-@remindme tomorrow 9am
-!remind Friday 14:00 follow up with QA
+Can you ping me in 20 minutes to check whether it is up?
+Remind me Friday morning to follow up with QA.
 ```
+
+The app reads every comment with AI (Claude, hosted by Atlassian through Forge LLMs) and decides whether you're asking for a reminder, and when. It also works out what the reminder is about, using the issue and the comments before yours. The Reddit-style `RemindMe!` keyword still works as an exact shortcut that needs no AI.
 
 The app replies right away. The reply mentions you and says something like:
 
-> @Emil Kalchev I'll remind you at 9:00 AM EET, Sun, Oct 25, 2026 (in 18 hours). Note: *check if Sam replied*
+> @Emil Kalchev I'll remind you at 1:48 PM GMT+3, Fri, Oct 23, 2026 (in 20 minutes). Note: *Check whether QA build is up*
 
-When the reminder is due, you get an email titled **Reminder: ABC-123 &lt;issue summary&gt;**. It contains your note, a link to the issue and a link to the comment that set the reminder.
+When the reminder is due, you get an email titled **Reminder: ABC-123 &lt;issue summary&gt;**. It contains the note, what your comment said, a link to the issue and a link to the comment that set the reminder.
 
 It is a Forge app: it runs entirely on Atlassian's infrastructure, with no servers to host and no data leaving Atlassian.
 
 ## Using it
+
+### In plain words
+
+Write a comment that asks to be reminded, pinged or nudged, with or without a time. For example: "remind me tomorrow to check the build", "ping me in 2 hours", "nudge me next week about this". Asking "which reminders do I have?" or "cancel my reminders" works too.
+
+- **When:** the AI turns your words into a time, and the app's own parser converts it to the exact moment in your time zone, so daylight saving is handled correctly. No time means one day later. A day without a time means 09:00. "Morning" is 09:00, "lunch" 12:00, "afternoon" 14:00, "end of day" 17:00 and "next week" next Monday 09:00.
+- **What it's about:** the AI writes a short note from your comment, the issue and up to 3 comments before yours, so "this" or "it" are resolved. The confirmation shows the note, so you can tell what it understood.
+- **When it doesn't act:** it is deliberately conservative. Reminding someone else ("remind Sam"), stating a plan ("I'll look tomorrow"), asking about the past, and quoted or pasted text don't set reminders. If it misreads you, edit the comment or use the keyword.
+- **Privacy:** the text of each comment (and the 3 before it, plus the issue summary) goes to Atlassian's hosted model. Nothing leaves Atlassian.
+- **Requests in plain words are never deleted.** Only an explicit `RemindMe! list`, `cancel` or `help` comment that contains nothing else is removed after the answer is emailed.
+
+### With the keyword
 
 | You write | What happens |
 | --- | --- |
 | `RemindMe! <when> [note]` | Sets a reminder. `!RemindMe`, `@remindme` and `!remind` work too, in any letter case. |
 | `RemindMe!` | Sets a reminder for one day from now. |
 | `RemindMe! <when> "note"` | Uses the quoted text as the note. Without quotes, the note is whatever follows the time. |
-| `RemindMe! list` | Lists your pending reminders on this issue, numbered. |
-| `RemindMe! cancel` | Cancels all your pending reminders on this issue. |
+| `RemindMe! list` | Emails you your pending reminders on this issue, numbered. |
+| `RemindMe! cancel` | Cancels all your pending reminders on this issue, and confirms by email. |
 | `RemindMe! cancel 2` | Cancels reminder number 2 from the list. |
-| `RemindMe! help` | Shows the accepted formats. |
+| `RemindMe! help` | Emails you the accepted formats. |
+
+`list`, `cancel` and `help` answer by email to you only, and a comment that contains nothing but the command is then deleted, so the issue keeps no trace of it. A keyword reminder without a note gets one from the AI when it is available.
 
 **When** can be either of these:
 
@@ -53,7 +67,7 @@ Rules:
 
 - Editing the comment moves the reminder, and the app rewrites its reply in place rather than posting a new one.
 - Editing the keyword out of the comment, or deleting the comment, cancels the reminder.
-- `list`, `cancel` and `help` answer only the first version of a comment.
+- List and cancel requests answer only the first version of a comment.
 - Each person can have at most 25 pending reminders per issue.
 
 **Who sees the replies.** A reply to a comment restricted to a role or group gets the same restriction. A reply to an internal comment in Jira Service Management is also internal.
@@ -61,7 +75,7 @@ Rules:
 ## How it works
 
 ```
-comment created/edited ──► trigger (avi:jira:commented:issue) ──► parse ──► KVS "reminder" entity
+comment created/edited ──► trigger (avi:jira:commented:issue) ──► keyword parser, or Forge LLM ──► KVS "reminder" entity
 comment deleted ─────────► trigger (avi:jira:deleted:comment) ──► cancel
 every 5 minutes ─────────► scheduledTrigger ──► due reminders ──► POST /issue/{id}/notify (one user)
 ```
@@ -69,6 +83,7 @@ every 5 minutes ─────────► scheduledTrigger ──► due re
 | File | Role |
 | --- | --- |
 | `src/adf.ts` | Extracts the comment's plain text from ADF, one line per paragraph, skipping code, quotes and mentions. |
+| `src/ai.ts` | Asks Forge LLMs what a comment wants: a reminder (with a time phrase and a note), a list, a cancel, or nothing. |
 | `src/command.ts` | Finds the keyword and splits the command from its arguments. |
 | `src/time.ts` | Turns the arguments into a due instant and a note. |
 | `src/format.ts` | Formats dates for the user's locale and time zone, with fallbacks. |
@@ -146,7 +161,9 @@ Each run stops claiming work after 100 seconds, within its 120-second timeout, a
 | `read:jira-user` | Reading the commenter's time zone, locale and display name. |
 | `storage:app` | Forge KVS. |
 
-The manifest declares no `permissions.external` and no remotes. The app makes no outbound calls outside Atlassian, uses only Forge-hosted compute and storage, and so stays eligible for **Runs on Atlassian**.
+The manifest also declares an `llm` module (model family `claude`) for Forge LLMs. Adding it made the app a new major version, which an admin approves at install or upgrade.
+
+The manifest declares no `permissions.external` and no remotes. The app makes no outbound calls outside Atlassian, uses only Forge-hosted compute and storage, and Forge LLMs are hosted by Atlassian, so it stays eligible for **Runs on Atlassian**. Forge confirms this on every deploy.
 
 ## What it costs to run
 
@@ -156,7 +173,11 @@ Forge has billed by usage since 1 January 2026. Every environment counts, but ea
 - 0.1 GB of KVS reads and 0.1 GB of KVS writes
 - 1 GB of logs
 
-This app is a small fraction of that. The five-minute job runs about 8,640 times a month, and an empty run takes well under a second. Every comment on the site invokes the comment trigger once, but a comment without a keyword costs one comment read and one KVS read before the trigger returns. Check the developer console's usage page after a week of real use.
+Compute and storage are a small fraction of that. The five-minute job runs about 8,640 times a month, and an empty run takes well under a second.
+
+**The AI is the real cost.** [Forge LLMs](https://developer.atlassian.com/platform/forge/runtime-reference/forge-llms-api-pricing/) have no free allowance and are billed to the app's Developer Space. Every comment of 6 characters or more that doesn't use the keyword gets one call to Claude Haiku. Measured on the developer site, a call is about 1,400 tokens in and 30–80 out, roughly **$0.0016 per comment**, so about **$1.60 per 1,000 comments** at $1 per million input tokens and $5 per million output tokens. Editing a comment calls it again. A keyword reminder costs one call only when it has no note.
+
+To estimate a site's bill, multiply its monthly comment count by $0.0016. The logs record each call as `LLM <model>: <in> in, <out> out`. Check the developer console's usage page after a week of real use.
 
 ## Setup
 
@@ -273,5 +294,7 @@ The time tests run with the process time zone set to `Pacific/Chatham`, so nothi
 - **Every confirmation is a comment.** Watchers of the issue are notified of it like any other comment. Reddit's bot has the same trade-off.
 - **Email only.** If someone turned off Jira email notifications, or their address bounces, the app can't tell. One community report says notify emails also reach deactivated users.
 - **Restricted comments.** A community report suggests Forge may not deliver events for comments with restricted visibility. If so, reminders in restricted comments are ignored.
-- **The display language is English.** Dates follow your locale, but the replies are in English.
-- **Confirmed on a developer site (23 Oct 2026).** The `avi:jira:commented:issue` payload carries what the app reads (`issue.id`, `issue.key`, `comment.id`), and its replies show **Remind Me** as the author, with account type `app`. Confirmations arrived within about 5 seconds of the comment.
+- **The display language is English.** Dates follow your locale, but the replies are in English. The AI writes the note in the comment's language.
+- **The AI can misread.** It is told to act only on clear requests, so it misses more often than it invents. A wrong confirmation is undone by editing or deleting the comment. If Forge LLMs are unavailable, plain-language requests are ignored (the error is logged), while the keyword keeps working.
+- **The AI model can be retired.** The app asks Forge for the active models at run time and prefers Haiku, then Sonnet. If Forge drops both families, plain-language reading stops until the preference list in `src/ai.ts` is updated.
+- **Confirmed on a developer site (23 Oct 2026).** The `avi:jira:commented:issue` payload carries what the app reads (`issue.id`, `issue.key`, `comment.id`), and its replies show **Remind Me** as the author, with account type `app`. Confirmations arrived within about 5 seconds of the comment. With the AI, "Can you ping me in 20 minutes to check whether it is up?", after a comment about the QA build, set a reminder with the note "Check whether QA build is up", while "I'll look at the logs tomorrow morning." and "Please remind Sam to update the docs on Monday." set none.
