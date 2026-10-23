@@ -21,6 +21,11 @@ describe('formatLocal', () => {
     expect(local.date).toBe('Sa., 24. Okt. 2026');
   });
 
+  it('does not round a whole duration down because of milliseconds', () => {
+    const local = formatLocal(new Date('2026-10-23T10:11:00.000Z'), 'Europe/Sofia', 'en-US', new Date('2026-10-23T10:01:00.942Z'));
+    expect(local.relative).toBe('in 10 minutes');
+  });
+
   it('builds the confirmation sentence', () => {
     const local = formatLocal(new Date('2026-12-01T14:00:00Z'), 'America/New_York', 'en-US', new Date('2026-12-01T13:00:00Z'));
     expect(confirmationText(local)).toBe("I'll remind you at 9:00 AM EST, Tue, Dec 1, 2026 (in 1 hour).");

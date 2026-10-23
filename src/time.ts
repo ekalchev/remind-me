@@ -30,7 +30,8 @@ export type WhenResult =
   | { ok: false; reason: 'unparsed' | 'past' | 'too-far' };
 
 export function resolveWhen(args: string, createdAt: Date, zone: string): WhenResult {
-  const reference = DateTime.fromJSDate(createdAt, { zone });
+  // Whole seconds, so "in 10 minutes" is exactly ten minutes after the second the comment was written.
+  const reference = DateTime.fromJSDate(createdAt, { zone }).startOf('second');
   const trimmed = args.trim();
 
   if (trimmed === '' || isQuoted(trimmed)) {
@@ -63,7 +64,7 @@ function finish(due: DateTime, rest: string, reference: DateTime): WhenResult {
   if (due > reference.plus({ days: MAX_AHEAD_DAYS })) {
     return { ok: false, reason: 'too-far' };
   }
-  return { ok: true, dueAt: due.toUTC().set({ millisecond: 0 }).toJSDate(), note: extractNote(rest) };
+  return { ok: true, dueAt: due.toUTC().toJSDate(), note: extractNote(rest) };
 }
 
 const TIME_OF_DAY_WORDS = /\b(morning|afternoon|evening|tonight|night|noon|midday|midnight|lunch)\b/i;

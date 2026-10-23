@@ -121,6 +121,10 @@ describe('clock times in the commenter zone', () => {
   it('reads the time relative to when the comment was written, not when it is processed', () => {
     expect(due('in 10 minutes', '2026-01-01T00:00:00Z', 'UTC')).toBe('2026-01-01T00:10:00.000Z');
   });
+
+  it('counts from the whole second the comment was written in', () => {
+    expect(due('in 10 minutes', '2026-10-23T10:01:00.942Z', 'Europe/Sofia')).toBe('2026-10-23T10:11:00.000Z');
+  });
 });
 
 describe('daylight saving time', () => {

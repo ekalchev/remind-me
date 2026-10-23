@@ -24,7 +24,8 @@ export function formatLocal(instant: Date, zone: string, locale: string, base: D
   return {
     time: `${local.toLocaleString(DateTime.TIME_SIMPLE)} ${zoneName}`,
     date: local.toLocaleString({ weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
-    relative: local.toRelative({ base: DateTime.fromJSDate(base, { zone }), locale: 'en' }) ?? '',
+    // Luxon truncates toward zero, so a base 0.9 s past the minute would turn "in 10 minutes" into "in 9 minutes".
+    relative: local.toRelative({ base: DateTime.fromJSDate(base, { zone }).startOf('second'), locale: 'en' }) ?? '',
   };
 }
 

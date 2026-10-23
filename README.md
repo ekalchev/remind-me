@@ -274,6 +274,4 @@ The time tests run with the process time zone set to `Pacific/Chatham`, so nothi
 - **Email only.** If someone turned off Jira email notifications, or their address bounces, the app can't tell. One community report says notify emails also reach deactivated users.
 - **Restricted comments.** A community report suggests Forge may not deliver events for comments with restricted visibility. If so, reminders in restricted comments are ignored.
 - **The display language is English.** Dates follow your locale, but the replies are in English.
-- **Assumptions to confirm on the first deploy.** The docs didn't settle these, so check them in `forge logs` the first time:
-  - The `avi:jira:commented:issue` payload has `issue.id`, `issue.key` and `comment.id`. The app re-reads the comment through the v3 API, so the body format in the event doesn't matter.
-  - Comments the app posts show the app as their author.
+- **Confirmed on a developer site (23 Oct 2026).** The `avi:jira:commented:issue` payload carries what the app reads (`issue.id`, `issue.key`, `comment.id`), and its replies show **Remind Me** as the author, with account type `app`. Confirmations arrived within about 5 seconds of the comment.
