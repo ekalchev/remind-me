@@ -1,0 +1,30 @@
+{
+  "name": "remind-me",
+  "version": "1.0.0",
+  "description": "Reddit-style RemindMe! comments for Jira Cloud, built on Atlassian Forge.",
+  "private": true,
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.12.0"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "forge lint",
+    "deploy": "forge deploy",
+    "deploy:production": "forge deploy -e production"
+  },
+  "dependencies": {
+    "@forge/api": "^8.3.0",
+    "@forge/kvs": "^2.1.0",
+    "chrono-node": "^2.10.3",
+    "luxon": "^3.7.2"
+  },
+  "devDependencies": {
+    "@types/luxon": "^3.7.1",
+    "@types/node": "^22.19.0",
+    "typescript": "~5.9.3",
+    "vitest": "^5.0.5"
+  }
+}

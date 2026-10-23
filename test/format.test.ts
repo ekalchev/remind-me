@@ -1,0 +1,64 @@
+import { describe, expect, it } from 'vitest';
+import { formatLocal, parseJiraDate, resolveLocale, resolveZone } from '../src/format';
+import { confirmationText, reminderEmail } from '../src/messages';
+
+describe('formatLocal', () => {
+  it('formats in the user zone and locale, with the zone name', () => {
+    const local = formatLocal(new Date('2026-10-24T07:00:00Z'), 'Europe/Berlin', 'en-US', new Date('2026-10-23T13:00:00Z'));
+    expect(local.time).toBe('9:00 AM GMT+2');
+    expect(local.date).toBe('Sat, Oct 24, 2026');
+    expect(local.relative).toBe('in 18 hours');
+  });
+
+  it('uses the abbreviation where one exists', () => {
+    const local = formatLocal(new Date('2026-12-01T14:00:00Z'), 'America/New_York', 'en-US', new Date('2026-11-30T14:00:00Z'));
+    expect(local.time).toBe('9:00 AM EST');
+  });
+
+  it('follows the user locale for the date and time shape', () => {
+    const local = formatLocal(new Date('2026-10-24T07:00:00Z'), 'Europe/Berlin', 'de-DE', new Date('2026-10-23T07:00:00Z'));
+    expect(local.time).toBe('09:00 GMT+2');
+    expect(local.date).toBe('Sa., 24. Okt. 2026');
+  });
+
+  it('builds the confirmation sentence', () => {
+    const local = formatLocal(new Date('2026-12-01T14:00:00Z'), 'America/New_York', 'en-US', new Date('2026-12-01T13:00:00Z'));
+    expect(confirmationText(local)).toBe("I'll remind you at 9:00 AM EST, Tue, Dec 1, 2026 (in 1 hour).");
+  });
+});
+
+describe('profile fallbacks', () => {
+  it('falls back to UTC when the zone is hidden or unknown', () => {
+    expect(resolveZone(null)).toEqual({ zone: 'UTC', fallback: true });
+    expect(resolveZone('Mars/Olympus')).toEqual({ zone: 'UTC', fallback: true });
+    expect(resolveZone('Europe/Sofia')).toEqual({ zone: 'Europe/Sofia', fallback: false });
+  });
+
+  it('converts Jira locales to BCP 47', () => {
+    expect(resolveLocale('en_GB')).toBe('en-GB');
+    expect(resolveLocale(null)).toBe('en-US');
+    expect(resolveLocale('not a locale!')).toBe('en-US');
+  });
+});
+
+describe('parseJiraDate', () => {
+  it('accepts offsets without a colon', () => {
+    expect(parseJiraDate('2026-10-23T09:15:02.123+0300').toISOString()).toBe('2026-10-23T06:15:02.123Z');
+    expect(parseJiraDate('2026-10-23T09:15:02.123+0000').toISOString()).toBe('2026-10-23T09:15:02.123Z');
+  });
+});
+
+describe('reminderEmail', () => {
+  it('addresses the issue and escapes HTML', () => {
+    const email = reminderEmail(
+      { note: 'check <script>', commentId: '10042', createdAt: Date.parse('2026-10-23T07:00:00Z'), zone: 'UTC', locale: 'en-US' },
+      { key: 'ABC-12', summary: 'Fix login & signup' },
+      'https://example.atlassian.net',
+    );
+    expect(email.subject).toBe('Reminder: ABC-12 Fix login & signup');
+    expect(email.textBody).toContain('Note: check <script>');
+    expect(email.textBody).toContain('https://example.atlassian.net/browse/ABC-12?focusedCommentId=10042');
+    expect(email.htmlBody).toContain('check &lt;script&gt;');
+    expect(email.htmlBody).toContain('Fix login &amp; signup');
+  });
+});
