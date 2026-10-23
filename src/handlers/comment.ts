@@ -5,32 +5,39 @@
  * A comment sets at most one reminder. Editing the comment re-parses it and
  * moves the reminder, rewriting the app's confirmation in place rather than
  * posting another; editing the command away or deleting the comment cancels
- * it. `list`, `cancel` and `help` answer only the first version of a comment.
+ * it. `list`, `cancel` and `help` answer only the first version of a comment,
+ * by email to the asker alone; a comment that held nothing but the command is
+ * then deleted, so the issue keeps no trace of it.
  */
 
 import kvs from '@forge/kvs';
 import { adfToText } from '../adf';
-import { parseCommand, type Command } from '../command';
+import { commentContext, parseCommand, type Command } from '../command';
 import { parseJiraDate, resolveLocale, resolveZone } from '../format';
 import {
   addComment,
+  deleteComment,
+  getBaseUrl,
   getComment,
   getUser,
+  notifyUser,
   replyTargetFor,
   updateComment,
   type JiraComment,
   type ReplyTarget,
 } from '../jira';
 import {
-  cancelDoc,
+  cancelEmail,
   cancelledByDeleteDoc,
   cancelledByEditDoc,
   confirmationDoc,
   helpDoc,
+  helpEmail,
   limitDoc,
-  listDoc,
+  listEmail,
   rescheduledDoc,
   type Recipient,
+  type ReminderEmail,
 } from '../messages';
 import { createReminder, findPending, getReminder, reminderKey, replaceReminder } from '../store';
 import { resolveWhen } from '../time';
@@ -60,7 +67,8 @@ export async function onComment(event: CommentEvent): Promise<void> {
   if (!comment || !accountId || comment.author?.accountType === 'app') {
     return;
   }
-  const command = parseCommand(adfToText(comment.body));
+  const text = adfToText(comment.body);
+  const command = parseCommand(text);
   const existing = await getReminder(reminderKey(commentId));
   if ((command.kind === 'none' && !existing) || !(await firstDeliveryOf(comment))) {
     return;
@@ -73,6 +81,7 @@ export async function onComment(event: CommentEvent): Promise<void> {
     issueId,
     issueKey: event.issue?.key ?? issueId,
     comment,
+    text,
     accountId,
     recipient,
     zone,
@@ -91,13 +100,19 @@ export async function onComment(event: CommentEvent): Promise<void> {
       await setReminder(context, command.args);
       break;
     case 'list':
-      if (!edited) await addComment(context.reply, listDoc(recipient, context.issueKey, await findPending(issueId, accountId), new Date()));
+      if (!edited) {
+        const pending = await findPending(issueId, accountId);
+        await answerPrivately(context, listEmail(context.issueKey, pending, new Date(), await getBaseUrl()));
+      }
       break;
     case 'cancel':
-      if (!edited) await cancelReminders(context, command.index);
+      if (!edited) {
+        const cancelled = await cancelReminders(context, command.index);
+        await answerPrivately(context, cancelEmail(context.issueKey, cancelled, await getBaseUrl(), command.index));
+      }
       break;
     case 'help':
-      if (!edited) await addComment(context.reply, helpDoc(recipient, 'help'));
+      if (!edited) await answerPrivately(context, helpEmail(context.issueKey, await getBaseUrl()));
       break;
     case 'none':
       break;
@@ -128,6 +143,7 @@ interface Context {
   issueId: string;
   issueKey: string;
   comment: JiraComment;
+  text: string;
   accountId: string;
   recipient: Recipient;
   zone: string;
@@ -214,7 +230,8 @@ async function onEdit(context: Context, command: Command, existing: Reminder): P
   }
 }
 
-async function cancelReminders(context: Context, index?: number): Promise<void> {
+/** Cancels all the user's pending reminders on the issue, or the `index`th as `list` numbers them; returns how many. */
+async function cancelReminders(context: Context, index?: number): Promise<number> {
   const pending = await findPending(context.issueId, context.accountId);
   const targets = index === undefined ? pending : index >= 1 ? pending.slice(index - 1, index) : [];
   let cancelled = 0;
@@ -223,7 +240,15 @@ async function cancelReminders(context: Context, index?: number): Promise<void> 
       cancelled++;
     }
   }
-  await addComment(context.reply, cancelDoc(context.recipient, context.issueKey, cancelled, index));
+  return cancelled;
+}
+
+/** Emails the answer to the asker, then deletes their comment if it held nothing but the command. */
+async function answerPrivately(context: Context, email: ReminderEmail): Promise<void> {
+  await notifyUser(context.issueId, context.accountId, email);
+  if (commentContext(context.text) === '' && !(await deleteComment(context.issueId, context.comment.id))) {
+    console.log(`Not allowed to delete command comment ${context.comment.id}; leaving it`);
+  }
 }
 
 function isEdited(comment: JiraComment): boolean {

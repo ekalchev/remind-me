@@ -1,6 +1,29 @@
 import { describe, expect, it } from 'vitest';
 import { formatLocal, parseJiraDate, resolveLocale, resolveZone } from '../src/format';
-import { confirmationText, reminderEmail } from '../src/messages';
+import { cancelEmail, confirmationText, listEmail, reminderEmail } from '../src/messages';
+import type { Reminder } from '../src/types';
+
+describe('private command emails', () => {
+  const base = 'https://example.atlassian.net';
+
+  it('numbers the pending reminders in the order cancel uses', () => {
+    const pending = [
+      { dueAt: Date.parse('2026-10-24T07:00:00Z'), note: 'QA', zone: 'UTC', locale: 'en-US' },
+      { dueAt: Date.parse('2026-10-25T07:00:00Z'), zone: 'UTC', locale: 'en-US' },
+    ] as Reminder[];
+    const email = listEmail('KAN-1', pending, new Date('2026-10-23T07:00:00Z'), base);
+    expect(email.subject).toBe('Your reminders on KAN-1');
+    expect(email.textBody).toContain('1. 7:00 AM UTC, Sat, Oct 24, 2026 (in 1 day) - QA');
+    expect(email.textBody).toContain('2. 7:00 AM UTC, Sun, Oct 25, 2026 (in 2 days)\n');
+    expect(email.textBody).toContain(`${base}/browse/KAN-1`);
+  });
+
+  it('says when there is nothing to list or cancel', () => {
+    expect(listEmail('KAN-1', [], new Date(), base).textBody).toContain('You have no pending reminders on KAN-1.');
+    expect(cancelEmail('KAN-1', 0, base, 3).textBody).toContain('no pending reminder number 3');
+    expect(cancelEmail('KAN-1', 2, base).textBody).toContain('Cancelled 2 reminders on KAN-1.');
+  });
+});
 
 describe('formatLocal', () => {
   it('formats in the user zone and locale, with the zone name', () => {

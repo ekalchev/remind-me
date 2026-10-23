@@ -22,7 +22,8 @@ export function formatLocal(instant: Date, zone: string, locale: string, base: D
   const local = DateTime.fromJSDate(instant, { zone }).setLocale(locale);
   const zoneName = local.setLocale('en-US').toFormat('ZZZZ');
   return {
-    time: `${local.toLocaleString(DateTime.TIME_SIMPLE)} ${zoneName}`,
+    // ICU puts a narrow no-break space (U+202F) before AM/PM, which some mail clients show as a box.
+    time: `${local.toLocaleString(DateTime.TIME_SIMPLE).replace(/ /g, ' ')} ${zoneName}`,
     date: local.toLocaleString({ weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' }),
     // Luxon truncates toward zero, so a base 0.9 s past the minute would turn "in 10 minutes" into "in 9 minutes".
     relative: local.toRelative({ base: DateTime.fromJSDate(base, { zone }).startOf('second'), locale: 'en' }) ?? '',

@@ -63,12 +63,11 @@ export function cancelledByDeleteDoc(): AdfNode {
   return doc(paragraph(text('This reminder was cancelled because its comment was deleted.')));
 }
 
-export function helpDoc(to: Recipient, reason: 'unparsed' | 'past' | 'too-far' | 'help'): AdfNode {
+export function helpDoc(to: Recipient, reason: 'unparsed' | 'past' | 'too-far'): AdfNode {
   const lead: Record<typeof reason, string> = {
     unparsed: " I couldn't work out when to remind you.",
     past: ' That time is already in the past.',
     'too-far': ' Reminders can be at most a year ahead.',
-    help: ' Here is how to use me.',
   };
   return doc(
     paragraph(mention(to), text(`${lead[reason]} Put the time right after the keyword, and an optional note after it, for example:`)),
@@ -80,38 +79,63 @@ export function helpDoc(to: Recipient, reason: 'unparsed' | 'past' | 'too-far' |
   );
 }
 
-export function listDoc(to: Recipient, issueKey: string, pending: Reminder[], now: Date): AdfNode {
-  if (pending.length === 0) {
-    return doc(paragraph(mention(to), text(` You have no pending reminders on ${issueKey}.`)));
-  }
-  return doc(
-    paragraph(mention(to), text(` Your pending reminders on ${issueKey}:`)),
-    {
-      type: 'orderedList',
-      content: pending.map((reminder) => {
-        const local = formatLocal(new Date(reminder.dueAt), reminder.zone, reminder.locale, now);
-        const line = `${local.time}, ${local.date} (${local.relative})${reminder.note ? ` - ${reminder.note}` : ''}`;
-        return { type: 'listItem', content: [paragraph(text(line))] };
-      }),
-    },
-    paragraph(text('Cancel one with RemindMe! cancel <number>, or all with RemindMe! cancel.')),
+export function limitDoc(to: Recipient, limit: number): AdfNode {
+  return doc(paragraph(mention(to), text(` You already have ${limit} pending reminders on this issue. Cancel some with RemindMe! cancel first.`)));
+}
+
+/**
+ * `list`, `cancel` and `help` answer by email to the asker only, so their
+ * reminders and the replies stay out of the issue's comments.
+ */
+export function listEmail(issueKey: string, pending: Reminder[], now: Date, baseUrl: string): ReminderEmail {
+  const lines = pending.map((reminder, index) => {
+    const local = formatLocal(new Date(reminder.dueAt), reminder.zone, reminder.locale, now);
+    return `${index + 1}. ${local.time}, ${local.date} (${local.relative})${reminder.note ? ` - ${reminder.note}` : ''}`;
+  });
+  return commandEmail(
+    `Your reminders on ${issueKey}`,
+    issueKey,
+    baseUrl,
+    pending.length === 0
+      ? [`You have no pending reminders on ${issueKey}.`]
+      : [
+          `Your pending reminders on ${issueKey}:`,
+          ...lines,
+          '',
+          'Cancel one with RemindMe! cancel <number>, or all with RemindMe! cancel.',
+        ],
   );
 }
 
-export function cancelDoc(to: Recipient, issueKey: string, cancelled: number, requestedIndex?: number): AdfNode {
+export function cancelEmail(issueKey: string, cancelled: number, baseUrl: string, requestedIndex?: number): ReminderEmail {
   let message: string;
   if (requestedIndex !== undefined && cancelled === 0) {
-    message = ` You have no pending reminder number ${requestedIndex} on ${issueKey}. Use RemindMe! list to see them.`;
+    message = `You have no pending reminder number ${requestedIndex} on ${issueKey}. Use RemindMe! list to see them.`;
   } else if (cancelled === 0) {
-    message = ` You have no pending reminders on ${issueKey}.`;
+    message = `You have no pending reminders on ${issueKey}.`;
   } else {
-    message = ` Cancelled ${cancelled} reminder${cancelled === 1 ? '' : 's'} on ${issueKey}.`;
+    message = `Cancelled ${cancelled} reminder${cancelled === 1 ? '' : 's'} on ${issueKey}.`;
   }
-  return doc(paragraph(mention(to), text(message)));
+  return commandEmail(`Reminders cancelled on ${issueKey}`, issueKey, baseUrl, [message]);
 }
 
-export function limitDoc(to: Recipient, limit: number): AdfNode {
-  return doc(paragraph(mention(to), text(` You already have ${limit} pending reminders on this issue. Cancel some with RemindMe! cancel first.`)));
+export function helpEmail(issueKey: string, baseUrl: string): ReminderEmail {
+  return commandEmail('How to use RemindMe!', issueKey, baseUrl, [
+    'Write RemindMe! in a Jira comment, with the time right after it and an optional note, for example:',
+    ...EXAMPLES.map((example) => `  ${example}`),
+    '',
+    'A plain RemindMe! reminds you in one day. @remindme, !RemindMe and !remind work too.',
+  ]);
+}
+
+function commandEmail(subject: string, issueKey: string, baseUrl: string, lines: string[]): ReminderEmail {
+  const issueUrl = `${baseUrl}/browse/${encodeURIComponent(issueKey)}`;
+  const text = [...lines, '', `Open ${issueKey}: ${issueUrl}`];
+  const html = [
+    ...lines.filter((line) => line !== '').map((line) => `<p>${escapeHtml(line)}</p>`),
+    `<p><a href="${escapeHtml(issueUrl)}">Open ${escapeHtml(issueKey)}</a></p>`,
+  ];
+  return { subject, textBody: text.join('\n'), htmlBody: html.join('') };
 }
 
 export interface ReminderEmail {

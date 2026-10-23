@@ -112,6 +112,16 @@ export async function updateComment(issueId: string, commentId: string, body: Ad
   await ensureOk(response, 'update comment');
 }
 
+/** Deletes a comment; false when the app is not allowed to, which leaves the comment in place. */
+export async function deleteComment(issueId: string, commentId: string): Promise<boolean> {
+  const response = await asApp().requestJira(route`/rest/api/3/issue/${issueId}/comment/${commentId}`, { method: 'DELETE' });
+  if (response.status === 403 || response.status === 404) {
+    return false;
+  }
+  await ensureOk(response, 'delete comment');
+  return true;
+}
+
 /** Emails one user through Jira's notification queue. */
 export async function notifyUser(issueId: string, accountId: string, email: ReminderEmail): Promise<void> {
   const response = await asApp().requestJira(route`/rest/api/3/issue/${issueId}/notify`, {
