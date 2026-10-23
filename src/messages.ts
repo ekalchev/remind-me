@@ -156,22 +156,27 @@ export function reminderEmail(
   commentContext = '',
 ): ReminderEmail {
   const issueUrl = `${baseUrl}/browse/${encodeURIComponent(issue.key)}`;
-  const commentUrl = `${issueUrl}?focusedCommentId=${encodeURIComponent(reminder.commentId)}`;
   const setAt = formatLocal(new Date(reminder.createdAt), reminder.zone, reminder.locale, new Date(reminder.createdAt));
-  const commentLabel = `Your comment from ${setAt.time}, ${setAt.date}`;
+  const setAtText = `${setAt.time}, ${setAt.date}`;
+  const commentUrl = reminder.commentId
+    ? `${issueUrl}?focusedCommentId=${encodeURIComponent(reminder.commentId)}`
+    : undefined;
+  const commentLabel = `Your comment from ${setAtText}`;
   const lines = [
     `You asked to be reminded about ${issue.key}: ${issue.summary}`,
     ...(reminder.note ? ['', `Note: ${reminder.note}`] : []),
     ...(commentContext ? ['', `${commentLabel}:`, `"${commentContext}"`] : []),
     '',
     `Open the issue: ${issueUrl}`,
-    `Open your comment: ${commentUrl}`,
+    commentUrl ? `Open your comment: ${commentUrl}` : `Set in Rovo chat at ${setAtText}.`,
   ];
   const html = [
     `<p>You asked to be reminded about <a href="${escapeHtml(issueUrl)}">${escapeHtml(issue.key)}: ${escapeHtml(issue.summary)}</a>.</p>`,
     ...(reminder.note ? [`<p><strong>Note:</strong> ${escapeHtml(reminder.note)}</p>`] : []),
     ...(commentContext ? [`<blockquote>${escapeHtml(commentContext)}</blockquote>`] : []),
-    `<p><a href="${escapeHtml(commentUrl)}">${escapeHtml(commentLabel)}</a></p>`,
+    commentUrl
+      ? `<p><a href="${escapeHtml(commentUrl)}">${escapeHtml(commentLabel)}</a></p>`
+      : `<p>Set in Rovo chat at ${escapeHtml(setAtText)}.</p>`,
   ];
   return {
     subject: `Reminder: ${issue.key} ${issue.summary}`,

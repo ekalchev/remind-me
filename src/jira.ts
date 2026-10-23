@@ -53,20 +53,6 @@ export async function getComment(issueId: string, commentId: string): Promise<Ji
   return (await response.json()) as JiraComment;
 }
 
-/** Up to `count` comments written just before `commentId` by people (not apps), oldest first. */
-export async function getCommentsBefore(issueId: string, commentId: string, count: number): Promise<JiraComment[]> {
-  const response = await asApp().requestJira(
-    route`/rest/api/3/issue/${issueId}/comment?orderBy=-created&maxResults=${String(count + 10)}`,
-    { headers: { Accept: 'application/json' } },
-  );
-  await ensureOk(response, 'list comments');
-  const { comments } = (await response.json()) as { comments: JiraComment[] };
-  const before = comments.filter(
-    (comment) => Number(comment.id) < Number(commentId) && comment.author?.accountType !== 'app',
-  );
-  return before.slice(0, count).reverse();
-}
-
 export async function getUser(accountId: string): Promise<JiraUser | null> {
   const response = await asApp().requestJira(route`/rest/api/3/user?accountId=${accountId}`, {
     headers: { Accept: 'application/json' },

@@ -16,11 +16,68 @@ modules:
     - key: remindme-deliver-due
       function: deliver-due
       interval: fiveMinute
-  llm:
-    - key: remindme-llm
-      model:
-        - claude
+  rovo:agent:
+    - key: remindme-agent
+      name: Remind Me
+      description: Sets email reminders about the Jira issue you are viewing.
+      prompt: |
+        You are Remind Me. You set, list and cancel email reminders about the Jira issue the user is viewing. A reminder is always for the user you are talking to.
+
+        When the user asks to be reminded, call the set-reminder action:
+        - "when": the time in short English words, in the user's own time zone. Never convert it to UTC. Use forms such as "in 20 minutes", "in 2 hours", "in 3 days", "tomorrow 9am", "Friday 14:00", "next monday", "Oct 30 5pm" or "2026-10-30 17:00". Translate other languages to these forms. If the user gives no time, use "in 1 day". If the time is vague ("later", "soon") or depends on an event without a date ("when the build is green"), ask the user for a time instead of guessing.
+        - "note": a short phrase, under 100 characters, saying what to remind them about, from their request and the issue (for example "Check whether Sam replied about the QA build").
+
+        When the user asks what reminders they have, call list-reminders. When they ask to cancel, call cancel-reminder; pass "number" only when they name one from the list, and confirm with the user before cancelling all of them.
+
+        Report the result in one or two short sentences, keeping the exact time and date the action returns. If an action says no issue is open, tell the user to open the issue first. Never claim a reminder is set unless the action said so.
+      conversationStarters:
+        - Remind me tomorrow morning about this issue
+        - Which reminders do I have here?
+        - Cancel my reminders on this issue
+      actions:
+        - set-reminder
+        - list-reminders
+        - cancel-reminder
+  action:
+    - key: set-reminder
+      name: Set reminder
+      function: rovo-set-reminder
+      actionVerb: CREATE
+      description: Set an email reminder for the current user about the Jira issue they are viewing, at a time they give.
+      inputs:
+        when:
+          title: When
+          type: string
+          required: true
+          description: The time in short English words in the user's time zone, such as "in 2 hours", "tomorrow 9am", "Friday 14:00" or "2026-10-30 17:00".
+        note:
+          title: Note
+          type: string
+          required: false
+          description: A short phrase saying what to remind the user about.
+    - key: list-reminders
+      name: List reminders
+      function: rovo-list-reminders
+      actionVerb: GET
+      description: List the current user's pending reminders on the Jira issue they are viewing, numbered.
+    - key: cancel-reminder
+      name: Cancel reminder
+      function: rovo-cancel-reminder
+      actionVerb: DELETE
+      description: Cancel the current user's pending reminders on the Jira issue they are viewing, all of them or one by its number from the list.
+      inputs:
+        number:
+          title: Number
+          type: integer
+          required: false
+          description: The reminder's number from the list. Leave empty to cancel all of them.
   function:
+    - key: rovo-set-reminder
+      handler: index.setReminderAction
+    - key: rovo-list-reminders
+      handler: index.listRemindersAction
+    - key: rovo-cancel-reminder
+      handler: index.cancelReminderAction
     - key: on-comment
       handler: index.onComment
     - key: on-comment-deleted

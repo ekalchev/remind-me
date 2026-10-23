@@ -64,7 +64,7 @@ async function deliver(reminder: Reminder, baseUrl: string): Promise<boolean> {
       await replaceReminder(reminder, { ...reminder, status: 'cancelled', lastError: 'issue no longer exists' });
       return false;
     }
-    const comment = await getComment(reminder.issueId, reminder.commentId);
+    const comment = reminder.commentId ? await getComment(reminder.issueId, reminder.commentId) : null;
     const context = comment ? commentContext(adfToText(comment.body)) : '';
     await notifyUser(reminder.issueId, reminder.accountId, reminderEmail(reminder, issue, baseUrl, context));
     await replaceReminder(reminder, {
