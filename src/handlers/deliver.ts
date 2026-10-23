@@ -13,7 +13,9 @@
  * issue is gone is cancelled.
  */
 
-import { getBaseUrl, getIssue, notifyUser } from '../jira';
+import { adfToText } from '../adf';
+import { commentContext } from '../command';
+import { getBaseUrl, getComment, getIssue, notifyUser } from '../jira';
 import { reminderEmail } from '../messages';
 import { findClaimable, replaceReminder } from '../store';
 import type { Reminder } from '../types';
@@ -62,7 +64,9 @@ async function deliver(reminder: Reminder, baseUrl: string): Promise<boolean> {
       await replaceReminder(reminder, { ...reminder, status: 'cancelled', lastError: 'issue no longer exists' });
       return false;
     }
-    await notifyUser(reminder.issueId, reminder.accountId, reminderEmail(reminder, issue, baseUrl));
+    const comment = await getComment(reminder.issueId, reminder.commentId);
+    const context = comment ? commentContext(adfToText(comment.body)) : '';
+    await notifyUser(reminder.issueId, reminder.accountId, reminderEmail(reminder, issue, baseUrl, context));
     await replaceReminder(reminder, {
       ...reminder,
       issueKey: issue.key,

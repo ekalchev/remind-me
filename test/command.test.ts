@@ -1,5 +1,22 @@
 import { describe, expect, it } from 'vitest';
-import { parseCommand } from '../src/command';
+import { commentContext, parseCommand } from '../src/command';
+
+describe('commentContext', () => {
+  it('is the comment without the command line', () => {
+    expect(commentContext('Waiting on QA. RemindMe! tomorrow')).toBe('Waiting on QA.');
+    expect(commentContext('Deploy is blocked.\nRemindMe! 2 days\nSam owns the fix.')).toBe('Deploy is blocked. Sam owns the fix.');
+  });
+
+  it('is empty when the comment is only the command', () => {
+    expect(commentContext('RemindMe! in 1 min')).toBe('');
+  });
+
+  it('is shortened with an ellipsis', () => {
+    const context = commentContext(`${'word '.repeat(100)}RemindMe! 1 day`);
+    expect(context.length).toBe(300);
+    expect(context.endsWith('…')).toBe(true);
+  });
+});
 
 describe('parseCommand', () => {
   it.each([

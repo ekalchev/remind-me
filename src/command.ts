@@ -15,6 +15,21 @@ export type Command =
 
 const KEYWORD = /(?<![\w@!])(?:remindme!|!remindme|@remindme|!remind)(?![\w!])/i;
 
+export const MAX_CONTEXT_LENGTH = 300;
+
+/**
+ * The comment's text without the command itself (the keyword to the end of
+ * its line), so a reminder email can show what the comment was about:
+ * "Waiting on QA. RemindMe! tomorrow" is about "Waiting on QA.".
+ */
+export function commentContext(text: string): string {
+  const match = KEYWORD.exec(text);
+  const lineEnd = match ? text.indexOf('\n', match.index) : -1;
+  const rest = match ? text.slice(0, match.index) + (lineEnd === -1 ? '' : text.slice(lineEnd)) : text;
+  const context = rest.replace(/\s+/g, ' ').trim();
+  return context.length > MAX_CONTEXT_LENGTH ? `${context.slice(0, MAX_CONTEXT_LENGTH - 1).trimEnd()}…` : context;
+}
+
 export function parseCommand(text: string): Command {
   const match = KEYWORD.exec(text);
   if (!match) {

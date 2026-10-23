@@ -8,6 +8,7 @@ const store = vi.hoisted(() => ({
 const jira = vi.hoisted(() => ({
   getBaseUrl: vi.fn(async () => 'https://example.atlassian.net'),
   getIssue: vi.fn(),
+  getComment: vi.fn(),
   notifyUser: vi.fn(),
 }));
 vi.mock('../src/store', () => store);
@@ -53,6 +54,7 @@ beforeEach(() => {
   store.findClaimable.mockResolvedValue({ reminders: [reminder()] });
   jira.getIssue.mockResolvedValue({ key: 'ABC-1', summary: 'Login fails' });
   jira.notifyUser.mockResolvedValue(undefined);
+  jira.getComment.mockResolvedValue({ id: '1', body: 'Waiting on QA. RemindMe! 2 hours', created: '', updated: '' });
 });
 
 describe('deliverDue', () => {
@@ -64,7 +66,7 @@ describe('deliverDue', () => {
     expect(jira.notifyUser).toHaveBeenCalledWith(
       '10001',
       'user-1',
-      expect.objectContaining({ subject: 'Reminder: ABC-1 Login fails' }),
+      expect.objectContaining({ subject: 'Reminder: ABC-1 Login fails', textBody: expect.stringContaining('"Waiting on QA."') }),
     );
     expect(writes[1]).toMatchObject({ status: 'sent', sentAt: NOW, attempts: 1 });
   });

@@ -6,7 +6,8 @@ export type ReminderStatus = 'pending' | 'sent' | 'failed' | 'cancelled';
  * a re-delivered event a no-op and lets an edit find what it replaces.
  *
  * Instants are epoch milliseconds held as `float`, because a KVS `integer` is
- * 32-bit.
+ * 32-bit. KVS rejects an empty string, so a field with no value (an empty
+ * note) is left out of the stored value rather than written as `''`.
  */
 export interface Reminder {
   id: string;
@@ -15,7 +16,7 @@ export interface Reminder {
   commentId: string;
   accountId: string;
   dueAt: number;
-  note: string;
+  note?: string;
   createdAt: number;
   sentAt?: number;
   status: ReminderStatus;

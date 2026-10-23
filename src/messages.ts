@@ -120,25 +120,34 @@ export interface ReminderEmail {
   htmlBody: string;
 }
 
+/**
+ * The reminder email: the issue, the note if one was given, and what the
+ * comment that set the reminder said around the command (`commentContext`),
+ * so a reminder without a note still says what it is about.
+ */
 export function reminderEmail(
   reminder: Pick<Reminder, 'note' | 'commentId' | 'createdAt' | 'zone' | 'locale'>,
   issue: { key: string; summary: string },
   baseUrl: string,
+  commentContext = '',
 ): ReminderEmail {
   const issueUrl = `${baseUrl}/browse/${encodeURIComponent(issue.key)}`;
   const commentUrl = `${issueUrl}?focusedCommentId=${encodeURIComponent(reminder.commentId)}`;
   const setAt = formatLocal(new Date(reminder.createdAt), reminder.zone, reminder.locale, new Date(reminder.createdAt));
+  const commentLabel = `Your comment from ${setAt.time}, ${setAt.date}`;
   const lines = [
     `You asked to be reminded about ${issue.key}: ${issue.summary}`,
     ...(reminder.note ? ['', `Note: ${reminder.note}`] : []),
+    ...(commentContext ? ['', `${commentLabel}:`, `"${commentContext}"`] : []),
     '',
     `Open the issue: ${issueUrl}`,
-    `Your comment from ${setAt.time}, ${setAt.date}: ${commentUrl}`,
+    `Open your comment: ${commentUrl}`,
   ];
   const html = [
     `<p>You asked to be reminded about <a href="${escapeHtml(issueUrl)}">${escapeHtml(issue.key)}: ${escapeHtml(issue.summary)}</a>.</p>`,
     ...(reminder.note ? [`<p><strong>Note:</strong> ${escapeHtml(reminder.note)}</p>`] : []),
-    `<p><a href="${escapeHtml(commentUrl)}">Your comment from ${escapeHtml(`${setAt.time}, ${setAt.date}`)}</a></p>`,
+    ...(commentContext ? [`<blockquote>${escapeHtml(commentContext)}</blockquote>`] : []),
+    `<p><a href="${escapeHtml(commentUrl)}">${escapeHtml(commentLabel)}</a></p>`,
   ];
   return {
     subject: `Reminder: ${issue.key} ${issue.summary}`,

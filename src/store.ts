@@ -27,7 +27,7 @@ export async function getReminder(id: string): Promise<Reminder | undefined> {
 /** Creates a reminder; false if one already exists for the comment (a re-delivered event). */
 export async function createReminder(reminder: Reminder): Promise<boolean> {
   try {
-    await reminders().set(reminder.id, reminder, { keyPolicy: 'FAIL_IF_EXISTS' });
+    await reminders().set(reminder.id, storable(reminder), { keyPolicy: 'FAIL_IF_EXISTS' });
     return true;
   } catch (error) {
     if (await reminders().get(reminder.id)) {
@@ -42,7 +42,7 @@ export async function createReminder(reminder: Reminder): Promise<boolean> {
  * Returns the stored reminder, or null when another writer got there first.
  */
 export async function replaceReminder(current: Reminder, next: Omit<Reminder, 'version'>): Promise<Reminder | null> {
-  const stored: Reminder = { ...next, version: current.version + 1 };
+  const stored = storable({ ...next, version: current.version + 1 });
   try {
     await kvs
       .transact()
@@ -56,6 +56,13 @@ export async function replaceReminder(current: Reminder, next: Omit<Reminder, 'v
     console.warn(`Conditional write of ${current.id} at version ${current.version} failed`, error);
     return null;
   }
+}
+
+/** The reminder without empty or missing fields, which KVS refuses to store. */
+export function storable(reminder: Reminder): Reminder {
+  return Object.fromEntries(
+    Object.entries(reminder).filter(([, value]) => value !== undefined && value !== ''),
+  ) as unknown as Reminder;
 }
 
 /** Pending reminders due by `now` that no run holds and no backoff delays, oldest first. */

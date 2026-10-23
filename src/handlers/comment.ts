@@ -197,7 +197,7 @@ async function onEdit(context: Context, command: Command, existing: Reminder): P
     }
     return;
   }
-  if (when.dueAt.getTime() === existing.dueAt && when.note === existing.note) {
+  if (when.dueAt.getTime() === existing.dueAt && when.note === (existing.note ?? '')) {
     return;
   }
   const moved = await replaceReminder(existing, {
